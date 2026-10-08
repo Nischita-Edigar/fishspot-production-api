@@ -187,7 +187,6 @@ async def create_uber_delivery(
             {
                 "name": "Fresh Fish Order",
                 "quantity": 1,
-                "size": "MEDIUM",
                 "price": 10000,
             }
         ],

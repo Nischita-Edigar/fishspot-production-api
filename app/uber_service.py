@@ -110,10 +110,10 @@ async def get_uber_delivery_quote(
             dropoff_address,
             separators=(",", ":"),
         ),
-        "pickup_latitude": pickup_latitude,
-        "pickup_longitude": pickup_longitude,
-        "dropoff_latitude": dropoff_latitude,
-        "dropoff_longitude": dropoff_longitude,
+        "pickup_latitude": float(pickup_latitude),
+        "pickup_longitude": float(pickup_longitude),
+        "dropoff_latitude": float(dropoff_latitude),
+        "dropoff_longitude": float(dropoff_longitude),
     }
 
     headers = {
@@ -154,6 +154,7 @@ async def create_uber_delivery(
     pickup_longitude: float,
     dropoff_latitude: float,
     dropoff_longitude: float,
+    manifest_items: list[dict] | None = None,
 ) -> dict:
     customer_id = os.getenv("UBER_CUSTOMER_ID")
 
@@ -168,6 +169,15 @@ async def create_uber_delivery(
         customer_id=customer_id
     )
 
+    if not manifest_items:
+        manifest_items = [
+            {
+                "name": "Fresh Fish Order",
+                "quantity": 1,
+                "price": 10000,
+            }
+        ]
+
     payload = {
         "quote_id": quote_id,
         "pickup_address": json.dumps(
@@ -178,8 +188,12 @@ async def create_uber_delivery(
         "pickup_phone_number": str(
             pickup_phone_number
         ),
-        "pickup_latitude": pickup_latitude,
-        "pickup_longitude": pickup_longitude,
+        "pickup_latitude": float(
+            pickup_latitude
+        ),
+        "pickup_longitude": float(
+            pickup_longitude
+        ),
         "dropoff_address": json.dumps(
             dropoff_address,
             separators=(",", ":"),
@@ -188,16 +202,14 @@ async def create_uber_delivery(
         "dropoff_phone_number": str(
             dropoff_phone_number
         ),
-        "dropoff_latitude": dropoff_latitude,
-        "dropoff_longitude": dropoff_longitude,
+        "dropoff_latitude": float(
+            dropoff_latitude
+        ),
+        "dropoff_longitude": float(
+            dropoff_longitude
+        ),
         "external_order_id": external_order_id,
-        "manifest_items": [
-            {
-                "name": "Fresh Fish Order",
-                "quantity": 1,
-                "price": 10000,
-            }
-        ],
+        "manifest_items": manifest_items,
     }
 
     headers = {

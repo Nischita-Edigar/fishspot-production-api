@@ -1,12 +1,14 @@
 import os
 import time
+import json
 
 import httpx
 
 
 UBER_TOKEN_URL = "https://auth.uber.com/oauth/v2/token"
-UBER_QUOTE_URL = "https://api.uber.com/v1/customers/{customer_id}/delivery_quotes"
-
+UBER_QUOTE_URL = (
+    "https://api.uber.com/v1/customers/{customer_id}/delivery_quotes"
+)
 
 _cached_token: str | None = None
 _token_expires_at: float = 0
@@ -90,8 +92,14 @@ async def get_uber_delivery_quote(
     )
 
     payload = {
-        "pickup_address": pickup_address,
-        "dropoff_address": dropoff_address,
+        "pickup_address": json.dumps(
+            pickup_address,
+            separators=(",", ":"),
+        ),
+        "dropoff_address": json.dumps(
+            dropoff_address,
+            separators=(",", ":"),
+        ),
     }
 
     headers = {

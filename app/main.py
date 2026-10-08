@@ -138,21 +138,20 @@ async def uber_delivery_test():
                 "Uber quote did not return a quote ID."
             )
 
-        delivery = await create_uber_delivery(
+      delivery = await create_uber_delivery(
             quote_id=quote_id,
             external_order_id="FISHSPOT-TEST-001",
             pickup_address=pickup_address,
             dropoff_address=dropoff_address,
+            pickup_name="Fish Spot Malpe",
             pickup_phone_number="+919876543210",
-            dropoff_phone_number="+919876543211",
             dropoff_name="Test Customer",
-            dropoff_phone_number=9008401064,
+            dropoff_phone_number="+919008401064",
             pickup_latitude=12.890616,
             pickup_longitude=77.582438,
             dropoff_latitude=12.890616,
             dropoff_longitude=77.582438,
         )
-
         return {
             "success": True,
             "quote": quote,

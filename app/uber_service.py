@@ -4,8 +4,8 @@ import time
 import httpx
 
 
-UBER_TOKEN_URL = "https://auth.uber.com/oauth/v2/token"
-UBER_STORES_URL = "https://api.uber.com/v1/eats/deliveries/stores"
+UBER_TOKEN_URL = "https://sandbox-login.uber.com/oauth/v2/token"
+UBER_STORES_URL = "https://test-api.uber.com/v1/eats/deliveries/stores"
 
 
 _cached_token: str | None = None

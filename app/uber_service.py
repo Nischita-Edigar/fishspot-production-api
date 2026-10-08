@@ -4,8 +4,8 @@ import time
 import httpx
 
 
-UBER_TOKEN_URL = "https://sandbox-login.uber.com/oauth/v2/token"
-UBER_STORES_URL = "https://test-api.uber.com/v1/eats/deliveries/stores"
+UBER_TOKEN_URL = "https://auth.uber.com/oauth/v2/token"
+UBER_QUOTE_URL = "https://api.uber.com/v1/customers/{customer_id}/delivery_quotes"
 
 
 _cached_token: str | None = None
@@ -72,35 +72,46 @@ async def get_uber_access_token() -> str:
     return access_token
 
 
-async def get_uber_stores(
-    latitude: float,
-    longitude: float,
+async def get_uber_delivery_quote(
+    pickup_address: dict,
+    dropoff_address: dict,
 ) -> dict:
+    customer_id = os.getenv("UBER_CUSTOMER_ID")
+
+    if not customer_id:
+        raise RuntimeError(
+            "UBER_CUSTOMER_ID is not configured."
+        )
+
     token = await get_uber_access_token()
 
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "pickup_at": 0,
+    url = UBER_QUOTE_URL.format(
+        customer_id=customer_id
+    )
+
+    payload = {
+        "pickup_address": pickup_address,
+        "dropoff_address": dropoff_address,
     }
 
     headers = {
         "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
     async with httpx.AsyncClient(
-        timeout=20.0
+        timeout=30.0
     ) as client:
-        response = await client.get(
-            UBER_STORES_URL,
-            params=params,
+        response = await client.post(
+            url,
+            json=payload,
             headers=headers,
         )
 
-    if response.status_code != 200:
+    if response.status_code not in (200, 201):
         raise RuntimeError(
-            f"Uber stores request failed: "
+            f"Uber quote request failed: "
             f"{response.status_code} - "
             f"{response.text}"
         )

@@ -16,6 +16,7 @@ from app.location_service import search_places
 from app.uber_service import (
     get_uber_access_token,
     get_uber_delivery_quote,
+    create_uber_delivery,
 )
 load_dotenv()
 
@@ -101,7 +102,55 @@ async def uber_quote(data: dict):
             "message": str(exc),
         }
 
+@app.post("/uber/delivery/test")
+async def uber_delivery_test():
+    try:
+        pickup_address = {
+            "street_address": [
+                "98 1st Cross Road"
+            ],
+            "city": "Bengaluru",
+            "state": "Karnataka",
+            "zip_code": "560078",
+            "country": "IN",
+        }
 
+        dropoff_address = {
+            "street_address": [
+                "Brigade Millennium",
+                "JP Nagar 7th Phase",
+            ],
+            "city": "Bengaluru",
+            "state": "Karnataka",
+            "zip_code": "560078",
+            "country": "IN",
+        }
+
+        delivery = await create_uber_delivery(
+            quote_id="dqt_z0oPH17QRO6vI6eAYcAUJg",
+            external_order_id="FISHSPOT-TEST-001",
+            pickup_address=pickup_address,
+            dropoff_address=dropoff_address,
+            pickup_name="Fish Spot Malpe",
+            pickup_phone_number="YOUR_SHOP_PHONE",
+            dropoff_name="Test Customer",
+            dropoff_phone_number="YOUR_TEST_PHONE",
+            pickup_latitude=12.890616,
+            pickup_longitude=77.582438,
+            dropoff_latitude=12.890616,
+            dropoff_longitude=77.582438,
+        )
+
+        return {
+            "success": True,
+            "delivery": delivery,
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "message": str(exc),
+        }
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),

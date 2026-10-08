@@ -13,6 +13,7 @@ from app import models  # noqa: F401 - registers SQLModel metadata
 from app.product_routes import router as product_router
 from app.twilio_service import send_otp, verify_otp
 from app.location_service import search_places
+from app.uber_service import get_uber_access_token
 
 load_dotenv()
 
@@ -42,6 +43,22 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+@app.get("/uber/test")
+async def uber_test():
+    try:
+        token = await get_uber_access_token()
+
+        return {
+            "success": True,
+            "message": "Uber authentication successful",
+            "token_received": bool(token),
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "message": str(exc),
+        }
 
 app.add_middleware(
     CORSMiddleware,

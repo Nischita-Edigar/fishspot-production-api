@@ -83,6 +83,10 @@ async def get_uber_access_token() -> str:
 async def get_uber_delivery_quote(
     pickup_address: dict,
     dropoff_address: dict,
+    pickup_latitude: float,
+    pickup_longitude: float,
+    dropoff_latitude: float,
+    dropoff_longitude: float,
 ) -> dict:
     customer_id = os.getenv("UBER_CUSTOMER_ID")
 
@@ -106,6 +110,10 @@ async def get_uber_delivery_quote(
             dropoff_address,
             separators=(",", ":"),
         ),
+        "pickup_latitude": pickup_latitude,
+        "pickup_longitude": pickup_longitude,
+        "dropoff_latitude": dropoff_latitude,
+        "dropoff_longitude": dropoff_longitude,
     }
 
     headers = {

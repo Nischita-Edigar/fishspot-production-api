@@ -15,7 +15,7 @@ from app.twilio_service import send_otp, verify_otp
 from app.location_service import search_places
 from app.uber_service import (
     get_uber_access_token,
-    get_uber_stores,
+    get_uber_delivery_quote,
 )
 load_dotenv()
 
@@ -61,17 +61,38 @@ async def uber_test():
             "success": False,
             "message": str(exc),
         }
-@app.get("/uber/stores")
-async def uber_stores():
+
+@app.post("/uber/quote")
+async def uber_quote(data: dict):
     try:
-        stores = await get_uber_stores(
-            latitude=12.890616,
-            longitude=77.582438,
+        pickup_address = {
+            "street_address": [
+                "98 1st Cross Road"
+            ],
+            "city": "Bengaluru",
+            "state": "Karnataka",
+            "zip_code": "560078",
+            "country": "IN",
+        }
+
+        dropoff_address = data.get(
+            "dropoff_address"
+        )
+
+        if not dropoff_address:
+            return {
+                "success": False,
+                "message": "Dropoff address is required.",
+            }
+
+        quote = await get_uber_delivery_quote(
+            pickup_address=pickup_address,
+            dropoff_address=dropoff_address,
         )
 
         return {
             "success": True,
-            "stores": stores,
+            "quote": quote,
         }
 
     except Exception as exc:
@@ -79,6 +100,7 @@ async def uber_stores():
             "success": False,
             "message": str(exc),
         }
+
 
 app.add_middleware(
     CORSMiddleware,

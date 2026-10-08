@@ -6,9 +6,15 @@ import httpx
 
 
 UBER_TOKEN_URL = "https://auth.uber.com/oauth/v2/token"
+
 UBER_QUOTE_URL = (
     "https://api.uber.com/v1/customers/{customer_id}/delivery_quotes"
 )
+
+UBER_DELIVERY_URL = (
+    "https://api.uber.com/v1/customers/{customer_id}/deliveries"
+)
+
 
 _cached_token: str | None = None
 _token_expires_at: float = 0
@@ -124,10 +130,10 @@ async def get_uber_delivery_quote(
             f"{response.text}"
         )
 
-    
-
     return response.json()
-    async def create_uber_delivery(
+
+
+async def create_uber_delivery(
     quote_id: str,
     external_order_id: str,
     pickup_address: dict,
@@ -150,9 +156,8 @@ async def get_uber_delivery_quote(
 
     token = await get_uber_access_token()
 
-    url = (
-        f"https://api.uber.com/"
-        f"v1/customers/{customer_id}/deliveries"
+    url = UBER_DELIVERY_URL.format(
+        customer_id=customer_id
     )
 
     payload = {

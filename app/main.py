@@ -13,8 +13,10 @@ from app import models  # noqa: F401 - registers SQLModel metadata
 from app.product_routes import router as product_router
 from app.twilio_service import send_otp, verify_otp
 from app.location_service import search_places
-from app.uber_service import get_uber_access_token
-
+from app.uber_service import (
+    get_uber_access_token,
+    get_uber_stores,
+)
 load_dotenv()
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -52,6 +54,24 @@ async def uber_test():
             "success": True,
             "message": "Uber authentication successful",
             "token_received": bool(token),
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "message": str(exc),
+        }
+@app.get("/uber/stores")
+async def uber_stores():
+    try:
+        stores = await get_uber_stores(
+            latitude=12.890616,
+            longitude=77.582438,
+        )
+
+        return {
+            "success": True,
+            "stores": stores,
         }
 
     except Exception as exc:

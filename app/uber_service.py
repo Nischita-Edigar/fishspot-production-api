@@ -167,7 +167,9 @@ async def create_uber_delivery(
             separators=(",", ":"),
         ),
         "pickup_name": pickup_name,
-        "pickup_phone_number": pickup_phone_number,
+        "pickup_phone_number": str(
+            pickup_phone_number
+        ),
         "pickup_latitude": pickup_latitude,
         "pickup_longitude": pickup_longitude,
         "dropoff_address": json.dumps(
@@ -175,10 +177,20 @@ async def create_uber_delivery(
             separators=(",", ":"),
         ),
         "dropoff_name": dropoff_name,
-        "dropoff_phone_number": dropoff_phone_number,
+        "dropoff_phone_number": str(
+            dropoff_phone_number
+        ),
         "dropoff_latitude": dropoff_latitude,
         "dropoff_longitude": dropoff_longitude,
         "external_order_id": external_order_id,
+        "manifest_items": [
+            {
+                "name": "Fresh Fish Order",
+                "quantity": 1,
+                "size": "MEDIUM",
+                "price": 10000,
+            }
+        ],
     }
 
     headers = {

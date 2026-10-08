@@ -117,8 +117,7 @@ async def uber_delivery_test():
 
         dropoff_address = {
             "street_address": [
-                "Brigade Millennium",
-                "JP Nagar 7th Phase",
+                "98 1st Cross Road"
             ],
             "city": "Bengaluru",
             "state": "Karnataka",
@@ -126,9 +125,19 @@ async def uber_delivery_test():
             "country": "IN",
         }
 
+        pickup_latitude = 12.890616
+        pickup_longitude = 77.582438
+
+        dropoff_latitude = 12.890616
+        dropoff_longitude = 77.582438
+
         quote = await get_uber_delivery_quote(
             pickup_address=pickup_address,
             dropoff_address=dropoff_address,
+            pickup_latitude=pickup_latitude,
+            pickup_longitude=pickup_longitude,
+            dropoff_latitude=dropoff_latitude,
+            dropoff_longitude=dropoff_longitude,
         )
 
         quote_id = quote.get("id")
@@ -147,10 +156,10 @@ async def uber_delivery_test():
             pickup_phone_number="+919876543210",
             dropoff_name="Test Customer",
             dropoff_phone_number="+919008401064",
-            pickup_latitude=12.890616,
-            pickup_longitude=77.582438,
-            dropoff_latitude=12.890616,
-            dropoff_longitude=77.582438,
+            pickup_latitude=pickup_latitude,
+            pickup_longitude=pickup_longitude,
+            dropoff_latitude=dropoff_latitude,
+            dropoff_longitude=dropoff_longitude,
         )
 
         return {

@@ -80,15 +80,39 @@ async def uber_quote(data: dict):
             "dropoff_address"
         )
 
+        dropoff_latitude = data.get(
+            "dropoff_latitude"
+        )
+
+        dropoff_longitude = data.get(
+            "dropoff_longitude"
+        )
+
         if not dropoff_address:
             return {
                 "success": False,
                 "message": "Dropoff address is required.",
             }
 
+        if dropoff_latitude is None:
+            return {
+                "success": False,
+                "message": "Dropoff latitude is required.",
+            }
+
+        if dropoff_longitude is None:
+            return {
+                "success": False,
+                "message": "Dropoff longitude is required.",
+            }
+
         quote = await get_uber_delivery_quote(
             pickup_address=pickup_address,
             dropoff_address=dropoff_address,
+            pickup_latitude=12.890616,
+            pickup_longitude=77.582438,
+            dropoff_latitude=float(dropoff_latitude),
+            dropoff_longitude=float(dropoff_longitude),
         )
 
         return {

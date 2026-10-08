@@ -124,4 +124,78 @@ async def get_uber_delivery_quote(
             f"{response.text}"
         )
 
+    
+
+    return response.json()
+    async def create_uber_delivery(
+    quote_id: str,
+    external_order_id: str,
+    pickup_address: dict,
+    dropoff_address: dict,
+    pickup_name: str,
+    pickup_phone_number: str,
+    dropoff_name: str,
+    dropoff_phone_number: str,
+    pickup_latitude: float,
+    pickup_longitude: float,
+    dropoff_latitude: float,
+    dropoff_longitude: float,
+) -> dict:
+    customer_id = os.getenv("UBER_CUSTOMER_ID")
+
+    if not customer_id:
+        raise RuntimeError(
+            "UBER_CUSTOMER_ID is not configured."
+        )
+
+    token = await get_uber_access_token()
+
+    url = (
+        f"https://api.uber.com/"
+        f"v1/customers/{customer_id}/deliveries"
+    )
+
+    payload = {
+        "quote_id": quote_id,
+        "pickup_address": json.dumps(
+            pickup_address,
+            separators=(",", ":"),
+        ),
+        "pickup_name": pickup_name,
+        "pickup_phone_number": pickup_phone_number,
+        "pickup_latitude": pickup_latitude,
+        "pickup_longitude": pickup_longitude,
+        "dropoff_address": json.dumps(
+            dropoff_address,
+            separators=(",", ":"),
+        ),
+        "dropoff_name": dropoff_name,
+        "dropoff_phone_number": dropoff_phone_number,
+        "dropoff_latitude": dropoff_latitude,
+        "dropoff_longitude": dropoff_longitude,
+        "external_order_id": external_order_id,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    async with httpx.AsyncClient(
+        timeout=30.0
+    ) as client:
+        response = await client.post(
+            url,
+            json=payload,
+            headers=headers,
+        )
+
+    if response.status_code not in (200, 201):
+        raise RuntimeError(
+            f"Uber delivery creation failed: "
+            f"{response.status_code} - "
+            f"{response.text}"
+        )
+
     return response.json()

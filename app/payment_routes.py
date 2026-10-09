@@ -635,15 +635,37 @@ async def create_msg91_customer_session(request: Msg91SessionRequest):
         phone = _find_phone_in_verified_jwt(request.access_token)
 
     if not phone:
-        # Safe diagnostics: field names only, never token/phone/response values.
+        # Safe diagnostics: log structure only, never token/phone/response values.
         top_keys = list(result.keys())
         data = result.get("data")
         data_keys = list(data.keys()) if isinstance(data, dict) else []
+        message = result.get("message")
+
+        jwt_claim_keys = []
+        try:
+            parts = request.access_token.split(".")
+            if len(parts) == 3:
+                payload_part = parts[1]
+                payload_part += "=" * (-len(payload_part) % 4)
+                claims = json.loads(
+                    base64.urlsafe_b64decode(payload_part.encode("ascii"))
+                )
+                if isinstance(claims, dict):
+                    jwt_claim_keys = list(claims.keys())
+        except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            pass
+
         logger = __import__("logging").getLogger(__name__)
         logger.warning(
-            "MSG91 token verified but phone claim was not found; top-level keys=%s, data keys=%s",
+            "MSG91 identity diagnostics: top_keys=%s, data_keys=%s, "
+            "message_type=%s, message_length=%s, message_is_phone=%s, "
+            "jwt_claim_keys=%s",
             top_keys,
             data_keys,
+            type(message).__name__,
+            len(message) if isinstance(message, str) else None,
+            bool(_normalise_phone(message)),
+            jwt_claim_keys,
         )
         raise HTTPException(
             status_code=502,

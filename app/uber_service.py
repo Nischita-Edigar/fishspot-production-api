@@ -1,6 +1,7 @@
+
+import json
 import os
 import time
-import json
 
 import httpx
 
@@ -15,14 +16,12 @@ UBER_DELIVERY_URL = (
     "https://api.uber.com/v1/customers/{customer_id}/deliveries"
 )
 
-
 _cached_token: str | None = None
 _token_expires_at: float = 0
 
 
 async def get_uber_access_token() -> str:
-    global _cached_token
-    global _token_expires_at
+    global _cached_token, _token_expires_at
 
     if _cached_token and time.time() < _token_expires_at - 60:
         return _cached_token
@@ -31,18 +30,12 @@ async def get_uber_access_token() -> str:
     client_secret = os.getenv("UBER_CLIENT_SECRET")
 
     if not client_id:
-        raise RuntimeError(
-            "UBER_CLIENT_ID is not configured."
-        )
+        raise RuntimeError("UBER_CLIENT_ID is not configured.")
 
     if not client_secret:
-        raise RuntimeError(
-            "UBER_CLIENT_SECRET is not configured."
-        )
+        raise RuntimeError("UBER_CLIENT_SECRET is not configured.")
 
-    async with httpx.AsyncClient(
-        timeout=20.0
-    ) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(
             UBER_TOKEN_URL,
             data={
@@ -55,27 +48,18 @@ async def get_uber_access_token() -> str:
 
     if response.status_code != 200:
         raise RuntimeError(
-            f"Uber authentication failed: "
-            f"{response.status_code} - "
-            f"{response.text}"
+            f"Uber authentication failed: {response.status_code}"
         )
 
     data = response.json()
-
     access_token = data.get("access_token")
-    expires_in = int(
-        data.get("expires_in", 0)
-    )
+    expires_in = int(data.get("expires_in", 0))
 
     if not access_token:
-        raise RuntimeError(
-            "Uber did not return an access token."
-        )
+        raise RuntimeError("Uber did not return an access token.")
 
     _cached_token = access_token
-    _token_expires_at = (
-        time.time() + expires_in
-    )
+    _token_expires_at = time.time() + expires_in
 
     return access_token
 
@@ -91,15 +75,11 @@ async def get_uber_delivery_quote(
     customer_id = os.getenv("UBER_CUSTOMER_ID")
 
     if not customer_id:
-        raise RuntimeError(
-            "UBER_CUSTOMER_ID is not configured."
-        )
+        raise RuntimeError("UBER_CUSTOMER_ID is not configured.")
 
     token = await get_uber_access_token()
 
-    url = UBER_QUOTE_URL.format(
-        customer_id=customer_id
-    )
+    url = UBER_QUOTE_URL.format(customer_id=customer_id)
 
     payload = {
         "pickup_address": json.dumps(
@@ -122,9 +102,7 @@ async def get_uber_delivery_quote(
         "Accept": "application/json",
     }
 
-    async with httpx.AsyncClient(
-        timeout=30.0
-    ) as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             url,
             json=payload,
@@ -133,9 +111,8 @@ async def get_uber_delivery_quote(
 
     if response.status_code not in (200, 201):
         raise RuntimeError(
-            f"Uber quote request failed: "
-            f"{response.status_code} - "
-            f"{response.text}"
+            f"Uber quote request failed with status "
+            f"{response.status_code}."
         )
 
     return response.json()
@@ -159,15 +136,14 @@ async def create_uber_delivery(
     customer_id = os.getenv("UBER_CUSTOMER_ID")
 
     if not customer_id:
-        raise RuntimeError(
-            "UBER_CUSTOMER_ID is not configured."
-        )
+        raise RuntimeError("UBER_CUSTOMER_ID is not configured.")
+
+    if not quote_id:
+        raise ValueError("Uber delivery quote ID is required.")
 
     token = await get_uber_access_token()
 
-    url = UBER_DELIVERY_URL.format(
-        customer_id=customer_id
-    )
+    url = UBER_DELIVERY_URL.format(customer_id=customer_id)
 
     if not manifest_items:
         manifest_items = [
@@ -185,29 +161,17 @@ async def create_uber_delivery(
             separators=(",", ":"),
         ),
         "pickup_name": pickup_name,
-        "pickup_phone_number": str(
-            pickup_phone_number
-        ),
-        "pickup_latitude": float(
-            pickup_latitude
-        ),
-        "pickup_longitude": float(
-            pickup_longitude
-        ),
+        "pickup_phone_number": str(pickup_phone_number),
+        "pickup_latitude": float(pickup_latitude),
+        "pickup_longitude": float(pickup_longitude),
         "dropoff_address": json.dumps(
             dropoff_address,
             separators=(",", ":"),
         ),
         "dropoff_name": dropoff_name,
-        "dropoff_phone_number": str(
-            dropoff_phone_number
-        ),
-        "dropoff_latitude": float(
-            dropoff_latitude
-        ),
-        "dropoff_longitude": float(
-            dropoff_longitude
-        ),
+        "dropoff_phone_number": str(dropoff_phone_number),
+        "dropoff_latitude": float(dropoff_latitude),
+        "dropoff_longitude": float(dropoff_longitude),
         "external_order_id": external_order_id,
         "manifest_items": manifest_items,
     }
@@ -218,9 +182,7 @@ async def create_uber_delivery(
         "Accept": "application/json",
     }
 
-    async with httpx.AsyncClient(
-        timeout=30.0
-    ) as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             url,
             json=payload,
@@ -228,10 +190,10 @@ async def create_uber_delivery(
         )
 
     if response.status_code not in (200, 201):
+        # Avoid logging credentials or customer address details.
         raise RuntimeError(
-            f"Uber delivery creation failed: "
-            f"{response.status_code} - "
-            f"{response.text}"
+            f"Uber delivery creation failed with status "
+            f"{response.status_code}."
         )
 
     return response.json()

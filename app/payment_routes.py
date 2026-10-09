@@ -470,9 +470,61 @@ class Msg91SessionRequest(BaseModel):
 
 
 def _normalise_phone(value: Any) -> str | None:
-    digits = re.sub(r"\D", "", str(value or ""))
+    """Return a valid Indian 10-digit mobile number, or None."""
+    if value is None or isinstance(value, (dict, list, tuple)):
+        return None
+    digits = re.sub(r"\\D", "", str(value))
     phone = digits[-10:]
-    return phone if re.fullmatch(r"[6-9]\d{9}", phone) else None
+    return phone if re.fullmatch(r"[6-9]\\d{9}", phone) else None
+
+
+def _find_phone_in_payload(value: Any, depth: int = 0) -> str | None:
+    """Search documented/variant response fields without logging personal data."""
+    if depth > 8:
+        return None
+
+    phone_keys = {
+        "identifier", "mobile", "phone", "number", "msisdn",
+        "mobile_number", "mobilenumber", "mobile_no", "mobileno",
+        "phone_number", "phonenumber", "phone_no", "phoneno",
+        "contact", "contact_number", "contactnumber",
+    }
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalised_key = re.sub(r"[^a-z]", "", str(key).lower())
+            if normalised_key in phone_keys:
+                phone = _normalise_phone(item)
+                if phone:
+                    return phone
+        for item in value.values():
+            phone = _find_phone_in_payload(item, depth + 1)
+            if phone:
+                return phone
+    elif isinstance(value, list):
+        for item in value:
+            phone = _find_phone_in_payload(item, depth + 1)
+            if phone:
+                return phone
+    return None
+
+
+def _find_phone_in_verified_jwt(access_token: str) -> str | None:
+    """
+    Read phone claims only AFTER MSG91 has confirmed this access token is valid.
+    MSG91's server-side verification remains the trust check; this is not a
+    replacement for signature verification.
+    """
+    try:
+        parts = access_token.split(".")
+        if len(parts) != 3:
+            return None
+        payload_part = parts[1]
+        payload_part += "=" * (-len(payload_part) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(payload_part.encode("ascii")))
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return _find_phone_in_payload(claims)
 
 
 def _encode_session_payload(payload: dict[str, Any]) -> str:
@@ -550,7 +602,6 @@ async def create_msg91_customer_session(request: Msg91SessionRequest):
             response.raise_for_status()
             result = response.json()
     except httpx.HTTPStatusError as exc:
-        # Do not return MSG91's raw body or credentials to the app.
         if exc.response.status_code in (400, 401, 403):
             raise HTTPException(
                 status_code=401,
@@ -566,32 +617,36 @@ async def create_msg91_customer_session(request: Msg91SessionRequest):
             detail="Could not verify your login with MSG91. Please try again.",
         )
 
+    # Some MSG91 responses can carry status in different fields. Never issue a
+    # customer session unless the server-side token verification explicitly succeeds.
     if not isinstance(result, dict) or str(result.get("type", "")).lower() != "success":
         raise HTTPException(
             status_code=401,
             detail="MSG91 could not verify this login. Please try again.",
         )
 
-    data = result.get("data")
-    if not isinstance(data, dict):
-        data = {}
-
-    # Only accept a phone number returned by MSG91, never one supplied separately by the app.
-    identifier = (
-        data.get("identifier")
-        or data.get("mobile")
-        or data.get("phone")
-        or result.get("identifier")
-        or result.get("mobile")
-        or result.get("phone")
-    )
-    phone = _normalise_phone(identifier)
+    # First use the verified information returned by MSG91. If the response omits
+    # the identifier, inspect JWT claims only after MSG91 has accepted the token.
+    phone = _find_phone_in_payload(result)
     if not phone:
+        phone = _find_phone_in_verified_jwt(request.access_token)
+
+    if not phone:
+        # Safe diagnostics: field names only, never token/phone/response values.
+        top_keys = list(result.keys())
+        data = result.get("data")
+        data_keys = list(data.keys()) if isinstance(data, dict) else []
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(
+            "MSG91 token verified but phone claim was not found; top-level keys=%s, data keys=%s",
+            top_keys,
+            data_keys,
+        )
         raise HTTPException(
             status_code=502,
             detail=(
-                "MSG91 verified the token but did not return a recognised mobile-number field. "
-                "Check the documented response format before continuing."
+                "MSG91 verified the OTP, but its response did not contain a usable "
+                "mobile number. Check the MSG91 widget configuration and token claims."
             ),
         )
 
@@ -631,4 +686,3 @@ def get_customer_orders(
         })
 
     return {"orders": result}
-

@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -37,6 +38,8 @@ class PaymentOrder(SQLModel, table=True):
     items_json: str
     address_json: str
     delivery_quote_id: str
+    customer_name: str | None = Field(default=None, max_length=120)
+    customer_phone: str | None = Field(default=None, max_length=20)
     payment_id: str | None = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -53,6 +56,8 @@ class CreateOrderRequest(BaseModel):
     dropoff_address: dict[str, Any]
     dropoff_latitude: float
     dropoff_longitude: float
+    customer_name: str = PydanticField(min_length=1, max_length=120)
+    customer_phone: str = PydanticField(min_length=10, max_length=20)
 
 
 class VerifyPaymentRequest(BaseModel):
@@ -81,7 +86,23 @@ async def create_order(
 ):
     key_id, key_secret = get_razorpay_keys()
 
+    customer_name = request.customer_name.strip()
+    customer_phone = re.sub(r"\D", "", request.customer_phone)[-10:]
+
+    if not customer_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer name is required.",
+        )
+
+    if not re.fullmatch(r"[6-9]\d{9}", customer_phone):
+        raise HTTPException(
+            status_code=400,
+            detail="Enter a valid 10-digit Indian mobile number.",
+        )
+
     product_ids = {item.product_id for item in request.items}
+
     products = session.exec(
         select(Product).where(
             Product.id.in_(product_ids),
@@ -111,6 +132,7 @@ async def create_order(
             )
 
         subtotal_paise += price_paise * item.quantity
+
         order_items.append({
             "product_id": item.product_id,
             "name": product.name,
@@ -177,7 +199,11 @@ async def create_order(
                     "amount": total_paise,
                     "currency": "INR",
                     "receipt": receipt,
-                    "notes": {"source": "Fish Spot Malpe"},
+                    "notes": {
+                        "source": "Fish Spot Malpe",
+                        "customer_name": customer_name,
+                        "customer_phone": customer_phone,
+                    },
                 },
             )
             response.raise_for_status()
@@ -190,6 +216,8 @@ async def create_order(
             items_json=json.dumps(order_items),
             address_json=json.dumps(request.dropoff_address),
             delivery_quote_id=str(quote_id),
+            customer_name=customer_name,
+            customer_phone=customer_phone,
         )
 
         session.add(payment_order)
@@ -234,9 +262,6 @@ async def verify_payment(
             detail="Payment order not found.",
         )
 
-    if payment_order.status == "paid":
-        return {"verified": True, "paid": True}
-
     message = (
         f"{payment_order.razorpay_order_id}|"
         f"{request.razorpay_payment_id}"
@@ -262,7 +287,7 @@ async def verify_payment(
             response = await client.get(
                 "https://api.razorpay.com/v1/payments/"
                 + request.razorpay_payment_id,
-                auth=get_razorpay_keys(),
+                auth=(get_razorpay_keys()),
             )
             response.raise_for_status()
             payment = response.json()
@@ -285,13 +310,24 @@ async def verify_payment(
             detail="Payment amount does not match this order.",
         )
 
+    if (
+        payment_order.status == "paid"
+        and payment_order.payment_id != request.razorpay_payment_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="This order is already linked to another payment.",
+        )
+
     payment_status = payment.get("status", "")
 
     payment_order.payment_id = request.razorpay_payment_id
     payment_order.status = (
-        "paid" if payment_status == "captured"
+        "paid"
+        if payment_status == "captured"
         else payment_status or "pending"
     )
+
     session.add(payment_order)
     session.commit()
 

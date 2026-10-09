@@ -469,13 +469,17 @@ class Msg91SessionRequest(BaseModel):
     access_token: str = PydanticField(min_length=1, max_length=10000)
 
 
+
 def _normalise_phone(value: Any) -> str | None:
     """Return a valid Indian 10-digit mobile number, or None."""
     if value is None or isinstance(value, (dict, list, tuple)):
         return None
-    digits = re.sub(r"\\D", "", str(value))
+
+    digits = re.sub(r"\D", "", str(value))
     phone = digits[-10:]
-    return phone if re.fullmatch(r"[6-9]\\d{9}", phone) else None
+
+    return phone if re.fullmatch(r"[6-9]\d{9}", phone) else None
+
 
 
 def _find_phone_in_payload(value: Any, depth: int = 0) -> str | None:

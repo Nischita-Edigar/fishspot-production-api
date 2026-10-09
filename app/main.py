@@ -1,4 +1,3 @@
-```python
 import os
 import re
 import logging
@@ -323,4 +322,3 @@ async def uber_delivery_test():
 
 app.include_router(product_router)
 app.include_router(payment_router)
-```

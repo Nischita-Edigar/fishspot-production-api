@@ -15,7 +15,10 @@ from sqlmodel import Field, Session, SQLModel, select
 
 from app.database import get_session
 from app.models import Product
-from app.uber_service import get_uber_delivery_quote
+from app.uber_service import (
+    create_uber_delivery,
+    get_uber_delivery_quote,
+)
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
@@ -29,6 +32,9 @@ PICKUP_ADDRESS = {
     "country": "IN",
 }
 
+PICKUP_LATITUDE = 12.890616
+PICKUP_LONGITUDE = 77.582438
+
 
 class PaymentOrder(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
@@ -41,6 +47,11 @@ class PaymentOrder(SQLModel, table=True):
     customer_name: str | None = Field(default=None, max_length=120)
     customer_phone: str | None = Field(default=None, max_length=20)
     payment_id: str | None = None
+    delivery_id: str | None = Field(default=None, index=True)
+    tracking_url: str | None = None
+    delivery_status: str = "not_created"
+    dropoff_latitude: float | None = None
+    dropoff_longitude: float | None = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -66,7 +77,7 @@ class VerifyPaymentRequest(BaseModel):
     razorpay_signature: str
 
 
-def get_razorpay_keys():
+def get_razorpay_keys() -> tuple[str, str]:
     key_id = os.getenv("RAZORPAY_KEY_ID")
     key_secret = os.getenv("RAZORPAY_KEY_SECRET")
 
@@ -140,13 +151,17 @@ async def create_order(
             "unit_price_paise": price_paise,
         })
 
-    if not request.dropoff_address.get("zip_code"):
+    zip_code = str(
+        request.dropoff_address.get("zip_code", "")
+    ).strip()
+
+    if not zip_code:
         raise HTTPException(
             status_code=400,
             detail="Delivery pincode is required.",
         )
 
-    if not str(request.dropoff_address["zip_code"]).strip().startswith("560"):
+    if not zip_code.startswith("560"):
         raise HTTPException(
             status_code=400,
             detail="Delivery is currently available only in Bangalore.",
@@ -156,8 +171,8 @@ async def create_order(
         quote = await get_uber_delivery_quote(
             pickup_address=PICKUP_ADDRESS,
             dropoff_address=request.dropoff_address,
-            pickup_latitude=12.890616,
-            pickup_longitude=77.582438,
+            pickup_latitude=PICKUP_LATITUDE,
+            pickup_longitude=PICKUP_LONGITUDE,
             dropoff_latitude=request.dropoff_latitude,
             dropoff_longitude=request.dropoff_longitude,
         )
@@ -209,25 +224,36 @@ async def create_order(
             response.raise_for_status()
             razorpay_order = response.json()
 
-        payment_order = PaymentOrder(
-            razorpay_order_id=razorpay_order["id"],
-            amount_paise=total_paise,
-            status="created",
-            items_json=json.dumps(order_items),
-            address_json=json.dumps(request.dropoff_address),
-            delivery_quote_id=str(quote_id),
-            customer_name=customer_name,
-            customer_phone=customer_phone,
-        )
-
-        session.add(payment_order)
-        session.commit()
-
-    except Exception:
-        session.rollback()
+    except httpx.HTTPError:
         raise HTTPException(
             status_code=502,
             detail="Could not create a payment order. Please try again.",
+        )
+
+    payment_order = PaymentOrder(
+        razorpay_order_id=razorpay_order["id"],
+        amount_paise=total_paise,
+        status="created",
+        items_json=json.dumps(order_items),
+        address_json=json.dumps(request.dropoff_address),
+        delivery_quote_id=str(quote_id),
+        customer_name=customer_name,
+        customer_phone=customer_phone,
+        dropoff_latitude=request.dropoff_latitude,
+        dropoff_longitude=request.dropoff_longitude,
+    )
+
+    try:
+        session.add(payment_order)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The payment order could not be saved. "
+                "Please contact support before retrying payment."
+            ),
         )
 
     return {
@@ -287,12 +313,12 @@ async def verify_payment(
             response = await client.get(
                 "https://api.razorpay.com/v1/payments/"
                 + request.razorpay_payment_id,
-                auth=(get_razorpay_keys()),
+                auth=(os.getenv("RAZORPAY_KEY_ID"), key_secret),
             )
             response.raise_for_status()
             payment = response.json()
 
-    except Exception:
+    except httpx.HTTPError:
         raise HTTPException(
             status_code=502,
             detail="Could not confirm payment status. Please retry.",
@@ -311,7 +337,7 @@ async def verify_payment(
         )
 
     if (
-        payment_order.status == "paid"
+        payment_order.payment_id
         and payment_order.payment_id != request.razorpay_payment_id
     ):
         raise HTTPException(
@@ -321,18 +347,116 @@ async def verify_payment(
 
     payment_status = payment.get("status", "")
 
-    payment_order.payment_id = request.razorpay_payment_id
-    payment_order.status = (
-        "paid"
-        if payment_status == "captured"
-        else payment_status or "pending"
-    )
+    if payment_status != "captured":
+        payment_order.status = payment_status or "pending"
+        session.add(payment_order)
+        session.commit()
 
+        return {
+            "verified": True,
+            "paid": False,
+            "status": payment_status or "pending",
+            "delivery_status": payment_order.delivery_status,
+            "tracking_url": payment_order.tracking_url,
+        }
+
+    payment_order.payment_id = request.razorpay_payment_id
+    payment_order.status = "paid"
     session.add(payment_order)
     session.commit()
+    session.refresh(payment_order)
+
+    # Only start delivery creation for orders that have not started it.
+    # A stuck "creating" status must be reconciled before retrying.
+    if payment_order.delivery_status == "not_created":
+        payment_order.delivery_status = "creating"
+        session.add(payment_order)
+        session.commit()
+
+        try:
+            if (
+                payment_order.dropoff_latitude is None
+                or payment_order.dropoff_longitude is None
+            ):
+                raise RuntimeError(
+                    "Saved delivery coordinates are missing."
+                )
+
+            pickup_phone = os.getenv("UBER_PICKUP_PHONE")
+            if not pickup_phone:
+                raise RuntimeError(
+                    "UBER_PICKUP_PHONE is not configured."
+                )
+
+            items = json.loads(payment_order.items_json)
+            address = json.loads(payment_order.address_json)
+
+            manifest_items = [
+                {
+                    "name": item["name"],
+                    "quantity": item["quantity"],
+                    "price": item["unit_price_paise"],
+                }
+                for item in items
+            ]
+
+            delivery = await create_uber_delivery(
+                quote_id=payment_order.delivery_quote_id,
+                external_order_id=payment_order.razorpay_order_id,
+                pickup_address=PICKUP_ADDRESS,
+                dropoff_address=address,
+                pickup_name=os.getenv(
+                    "UBER_PICKUP_NAME", "Fish Spot Malpe"
+                ),
+                pickup_phone_number=pickup_phone,
+                dropoff_name=payment_order.customer_name or "Customer",
+                dropoff_phone_number=(
+                    "+91" + (payment_order.customer_phone or "")
+                ),
+                pickup_latitude=PICKUP_LATITUDE,
+                pickup_longitude=PICKUP_LONGITUDE,
+                dropoff_latitude=payment_order.dropoff_latitude,
+                dropoff_longitude=payment_order.dropoff_longitude,
+                manifest_items=manifest_items,
+            )
+
+            delivery_id = (
+                delivery.get("id")
+                or delivery.get("delivery_id")
+                or delivery.get("uuid")
+            )
+            tracking_url = (
+                delivery.get("tracking_url")
+                or delivery.get("order_tracking_url")
+            )
+
+            if not delivery_id:
+                raise RuntimeError(
+                    "Uber response did not contain a delivery ID."
+                )
+
+            payment_order.delivery_id = str(delivery_id)
+            payment_order.tracking_url = tracking_url
+            payment_order.delivery_status = str(
+                delivery.get("status")
+                or delivery.get("state")
+                or "created"
+            ).lower()
+
+        except Exception:
+            # Payment remains paid. Do not automatically resubmit an
+            # ambiguous delivery request because Uber may have accepted it.
+            payment_order.delivery_status = "creation_failed"
+
+        session.add(payment_order)
+        session.commit()
+        session.refresh(payment_order)
 
     return {
         "verified": True,
-        "paid": payment_status == "captured",
-        "status": payment_status,
+        "paid": True,
+        "status": "captured",
+        "delivery_id": payment_order.delivery_id,
+        "tracking_url": payment_order.tracking_url,
+        "delivery_status": payment_order.delivery_status,
     }

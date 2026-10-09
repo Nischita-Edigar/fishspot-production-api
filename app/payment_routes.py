@@ -625,9 +625,12 @@ async def create_msg91_customer_session(request: Msg91SessionRequest):
             detail="MSG91 could not verify this login. Please try again.",
         )
 
-    # First use the verified information returned by MSG91. If the response omits
-    # the identifier, inspect JWT claims only after MSG91 has accepted the token.
-    phone = _find_phone_in_payload(result)
+    # MSG91's verifyAccessToken response can return the verified mobile number
+    # directly in the top-level "message" field.
+    phone = _normalise_phone(result.get("message"))
+    if not phone:
+        phone = _find_phone_in_payload(result)
+    # Inspect JWT claims only after MSG91 has accepted the token.
     if not phone:
         phone = _find_phone_in_verified_jwt(request.access_token)
 

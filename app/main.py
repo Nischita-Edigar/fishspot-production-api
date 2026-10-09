@@ -19,6 +19,7 @@ from app.uber_service import (
     create_uber_delivery,
 )
 load_dotenv()
+from app.payment_routes import router as payment_router
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("fishspot")
@@ -206,6 +207,7 @@ app.add_middleware(
 )
 
 app.include_router(product_router)
+app.include_router(payment_router)
 
 
 class SendOtpRequest(BaseModel):

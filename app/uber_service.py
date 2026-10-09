@@ -17,10 +17,7 @@ from sqlmodel import Field, Session, SQLModel, select
 
 from app.database import get_session
 from app.models import Product
-from app.uber_service import (
-    create_uber_delivery,
-    get_uber_delivery_quote,
-)
+
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 

@@ -5,11 +5,13 @@ import json
 import os
 import re
 import uuid
+import base64
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field as PydanticField
 from sqlmodel import Field, Session, SQLModel, select
 
@@ -460,3 +462,173 @@ async def verify_payment(
         "tracking_url": payment_order.tracking_url,
         "delivery_status": payment_order.delivery_status,
     }
+
+# ---------------- CUSTOMER AUTHENTICATION ----------------
+
+class Msg91SessionRequest(BaseModel):
+    access_token: str = PydanticField(min_length=1, max_length=10000)
+
+
+def _normalise_phone(value: Any) -> str | None:
+    digits = re.sub(r"\D", "", str(value or ""))
+    phone = digits[-10:]
+    return phone if re.fullmatch(r"[6-9]\d{9}", phone) else None
+
+
+def _encode_session_payload(payload: dict[str, Any]) -> str:
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _create_customer_session(phone: str) -> str:
+    secret = os.getenv("CUSTOMER_SESSION_SECRET")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Customer session authentication is not configured.",
+        )
+
+    payload = {
+        "phone": phone,
+        "exp": int(time.time()) + 60 * 60 * 24 * 30,
+    }
+    encoded = _encode_session_payload(payload)
+    signature = hmac.new(
+        secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256
+    ).digest()
+    signature_text = base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+    return f"{encoded}.{signature_text}"
+
+
+def _get_customer_phone_from_session(authorization: str | None) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Please log in again.")
+
+    token = authorization[7:].strip()
+    try:
+        encoded, supplied_signature = token.split(".", 1)
+        secret = os.getenv("CUSTOMER_SESSION_SECRET")
+        if not secret:
+            raise ValueError("Session secret missing")
+
+        expected = hmac.new(
+            secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256
+        ).digest()
+        expected_text = base64.urlsafe_b64encode(expected).decode("ascii").rstrip("=")
+        if not hmac.compare_digest(expected_text, supplied_signature):
+            raise ValueError("Invalid signature")
+
+        padded = encoded + "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            raise ValueError("Session expired")
+
+        phone = _normalise_phone(payload.get("phone"))
+        if not phone:
+            raise ValueError("Invalid phone")
+        return phone
+    except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=401, detail="Session is invalid or expired.")
+
+
+@router.post("/auth/msg91-session")
+async def create_msg91_customer_session(request: Msg91SessionRequest):
+    authkey = os.getenv("MSG91_AUTHKEY")
+    if not authkey:
+        raise HTTPException(
+            status_code=503,
+            detail="MSG91 authentication is not configured.",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                "https://control.msg91.com/api/v5/widget/verifyAccessToken",
+                json={"authkey": authkey, "access-token": request.access_token},
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            result = response.json()
+    except httpx.HTTPStatusError as exc:
+        # Do not return MSG91's raw body or credentials to the app.
+        if exc.response.status_code in (400, 401, 403):
+            raise HTTPException(
+                status_code=401,
+                detail="MSG91 could not verify this login. Please verify the OTP again.",
+            )
+        raise HTTPException(
+            status_code=502,
+            detail="MSG91 login verification is temporarily unavailable.",
+        )
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(
+            status_code=502,
+            detail="Could not verify your login with MSG91. Please try again.",
+        )
+
+    if not isinstance(result, dict) or str(result.get("type", "")).lower() != "success":
+        raise HTTPException(
+            status_code=401,
+            detail="MSG91 could not verify this login. Please try again.",
+        )
+
+    data = result.get("data")
+    if not isinstance(data, dict):
+        data = {}
+
+    # Only accept a phone number returned by MSG91, never one supplied separately by the app.
+    identifier = (
+        data.get("identifier")
+        or data.get("mobile")
+        or data.get("phone")
+        or result.get("identifier")
+        or result.get("mobile")
+        or result.get("phone")
+    )
+    phone = _normalise_phone(identifier)
+    if not phone:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "MSG91 verified the token but did not return a recognised mobile-number field. "
+                "Check the documented response format before continuing."
+            ),
+        )
+
+    return {"session_token": _create_customer_session(phone), "phone": phone}
+
+
+@router.get("/orders")
+def get_customer_orders(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    session: Session = Depends(get_session),
+):
+    phone = _get_customer_phone_from_session(authorization)
+    orders = session.exec(
+        select(PaymentOrder)
+        .where(PaymentOrder.customer_phone == phone)
+        .order_by(PaymentOrder.created_at.desc())
+    ).all()
+
+    result = []
+    for order in orders:
+        try:
+            items = json.loads(order.items_json)
+            if not isinstance(items, list):
+                items = []
+        except (TypeError, json.JSONDecodeError):
+            items = []
+
+        result.append({
+            "id": order.id,
+            "razorpay_order_id": order.razorpay_order_id,
+            "status": order.status,
+            "items": items,
+            "total_paise": order.amount_paise,
+            "created_at": order.created_at.isoformat(),
+            "delivery_status": order.delivery_status,
+            "tracking_url": order.tracking_url,
+        })
+
+    return {"orders": result}
+

@@ -656,17 +656,26 @@ async def create_msg91_customer_session(request: Msg91SessionRequest):
             pass
 
         logger = __import__("logging").getLogger(__name__)
+    
         logger.warning(
             "MSG91 identity diagnostics: top_keys=%s, data_keys=%s, "
             "message_type=%s, message_length=%s, message_is_phone=%s, "
-            "jwt_claim_keys=%s",
+            "message_preview=%s, jwt_claim_keys=%s",
             top_keys,
             data_keys,
             type(message).__name__,
             len(message) if isinstance(message, str) else None,
             bool(_normalise_phone(message)),
+            (
+                message
+                if isinstance(message, str)
+                and len(message) <= 30
+                and "." not in message
+                else "<omitted>"
+            ),
             jwt_claim_keys,
         )
+
         raise HTTPException(
             status_code=502,
             detail=(

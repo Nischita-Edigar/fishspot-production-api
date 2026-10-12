@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-
 from sqlmodel import Field, SQLModel
 
 
@@ -7,31 +6,26 @@ class Product(SQLModel, table=True):
     __tablename__ = "products"
 
     id: int | None = Field(default=None, primary_key=True)
-
-    # Basic product information
     name: str = Field(index=True)
     category: str = Field(index=True)
-
-    # Product details
     size: str | None = None
     fish_size: str | None = None
     cut: str | None = None
     pieces: str | None = None
-
-    # Pricing
     price: float = 0.0
-
-    # Product image
     image: str | None = None
-
-    # Product availability
     is_active: bool = True
 
-    # Timestamps
+    # Product detail page fields
+    net_quantity: str = Field(default="250g")
+    protein_per_100g: float | None = Field(default=None)
+    calories_per_100g: float | None = Field(default=None)
+    healthy_fat_per_100g: float | None = Field(default=None)
+    description: str | None = None
+
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
-
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

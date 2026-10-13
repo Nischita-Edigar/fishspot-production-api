@@ -17,6 +17,7 @@ from app.product_routes import router as product_router
 from app.twilio_service import send_otp, verify_otp
 from app.location_service import search_places
 from app.payment_routes import router as payment_router
+from app.admin_routes import router as admin_router
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -322,3 +323,4 @@ async def uber_delivery_test():
 
 app.include_router(product_router)
 app.include_router(payment_router)
+app.include_router(admin_router)

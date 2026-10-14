@@ -324,3 +324,5 @@ async def uber_delivery_test():
 app.include_router(product_router)
 app.include_router(payment_router)
 app.include_router(admin_router)
+from app.stock_routes import router as stock_router
+app.include_router(stock_router)

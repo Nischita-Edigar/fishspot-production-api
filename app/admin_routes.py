@@ -85,4 +85,6 @@ def update_product(product_id: int, data: ProductUpdate, session: Session = Depe
     session.add(product)
     session.commit()
     session.refresh(product)
+    from app.product_cache import invalidate_products_cache
+    invalidate_products_cache()
     return product

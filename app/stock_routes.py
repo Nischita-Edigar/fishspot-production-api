@@ -24,6 +24,9 @@ class DailyProductStock(SQLModel, table=True):
 class StockUpdate(BaseModel):
     total_kg: float = Field(ge=0, le=10000)
 
+class RestockUpdate(BaseModel):
+    add_kg: float = Field(gt=0, le=10000)
+
 def stock_row(session: Session, product_id: int):
     day=today_ist()
     row=session.exec(select(DailyProductStock).where(DailyProductStock.product_id==product_id, DailyProductStock.stock_date==day)).first()
@@ -60,3 +63,22 @@ def consume_stock(session:Session, items:list[dict]):
         result=session.exec(update(DailyProductStock).where(DailyProductStock.id==s.id, DailyProductStock.total_grams-DailyProductStock.sold_grams>=required).values(sold_grams=DailyProductStock.sold_grams+required))
         if result.rowcount != 1: raise ValueError(f"Not enough stock for {p.name}")
     session.commit()
+
+
+@router.post("/admin/stock/{product_id}/restock", dependencies=[Depends(require_admin)])
+def add_restock(product_id: int, data: RestockUpdate, session: Session = Depends(get_session)):
+    """Add new stock to today's total without resetting quantity already sold."""
+    if not session.get(Product, product_id):
+        raise HTTPException(404, "Product not found")
+    s = stock_row(session, product_id)
+    s.total_grams += round(data.add_kg * 1000)
+    session.add(s)
+    session.commit()
+    session.refresh(s)
+    return {
+        "product_id": product_id,
+        "total_kg": s.total_grams / 1000,
+        "sold_kg": s.sold_grams / 1000,
+        "remaining_kg": max(0, s.total_grams - s.sold_grams) / 1000,
+        "added_kg": round(data.add_kg, 3),
+    }

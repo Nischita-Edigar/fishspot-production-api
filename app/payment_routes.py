@@ -17,6 +17,7 @@ from sqlmodel import Field, Session, SQLModel, select
 
 from app.database import get_session
 from app.models import Product
+from app.stock_routes import consume_stock
 from app.uber_service import (
     create_uber_delivery,
     get_uber_delivery_quote,
@@ -362,11 +363,16 @@ async def verify_payment(
             "tracking_url": payment_order.tracking_url,
         }
 
-    payment_order.payment_id = request.razorpay_payment_id
-    payment_order.status = "paid"
-    session.add(payment_order)
-    session.commit()
-    session.refresh(payment_order)
+    if payment_order.status != "paid":
+        try:
+            consume_stock(session, json.loads(payment_order.items_json))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        payment_order.payment_id = request.razorpay_payment_id
+        payment_order.status = "paid"
+        session.add(payment_order)
+        session.commit()
+        session.refresh(payment_order)
 
     # Only start delivery creation for orders that have not started it.
     # A stuck "creating" status must be reconciled before retrying.

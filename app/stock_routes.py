@@ -50,6 +50,8 @@ def update_stock(product_id:int, data:StockUpdate, session:Session=Depends(get_s
     s=stock_row(session,product_id); s.total_grams=round(data.total_kg*1000)
     if s.total_grams < s.sold_grams: raise HTTPException(400,"Total stock cannot be less than stock already sold")
     session.add(s); session.commit(); session.refresh(s)
+    from app.product_cache import invalidate_products_cache
+    invalidate_products_cache()
     return {"product_id":product_id,"total_kg":s.total_grams/1000,"sold_kg":s.sold_grams/1000,"remaining_kg":(s.total_grams-s.sold_grams)/1000}
 
 def consume_stock(session:Session, items:list[dict]):
@@ -63,6 +65,8 @@ def consume_stock(session:Session, items:list[dict]):
         result=session.exec(update(DailyProductStock).where(DailyProductStock.id==s.id, DailyProductStock.total_grams-DailyProductStock.sold_grams>=required).values(sold_grams=DailyProductStock.sold_grams+required))
         if result.rowcount != 1: raise ValueError(f"Not enough stock for {p.name}")
     session.commit()
+    from app.product_cache import invalidate_products_cache
+    invalidate_products_cache()
 
 
 @router.post("/admin/stock/{product_id}/restock", dependencies=[Depends(require_admin)])
@@ -75,6 +79,8 @@ def add_restock(product_id: int, data: RestockUpdate, session: Session = Depends
     session.add(s)
     session.commit()
     session.refresh(s)
+    from app.product_cache import invalidate_products_cache
+    invalidate_products_cache()
     return {
         "product_id": product_id,
         "total_kg": s.total_grams / 1000,

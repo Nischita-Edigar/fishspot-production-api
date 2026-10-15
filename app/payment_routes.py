@@ -363,7 +363,8 @@ async def verify_payment(
             "tracking_url": payment_order.tracking_url,
         }
 
-    if payment_order.status != "paid":
+    newly_paid = payment_order.status != "paid"
+    if newly_paid:
         try:
             consume_stock(session, json.loads(payment_order.items_json))
         except ValueError as exc:
@@ -373,6 +374,18 @@ async def verify_payment(
         session.add(payment_order)
         session.commit()
         session.refresh(payment_order)
+        try:
+            from app.push_service import send_admin_push
+            send_admin_push(session, {
+                "title": "New Fish Spot Malpe order",
+                "body": f"{payment_order.customer_name or 'Customer'} · ₹{payment_order.amount_paise / 100:.2f}",
+                "url": "/",
+                "tag": payment_order.razorpay_order_id,
+                "order_id": payment_order.razorpay_order_id,
+            })
+        except Exception:
+            import logging
+            logging.getLogger("fishspot.push").exception("Could not send new-order push notification")
 
     # Only start delivery creation for orders that have not started it.
     # A stuck "creating" status must be reconciled before retrying.

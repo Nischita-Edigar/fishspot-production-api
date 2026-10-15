@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.database import check_database_connection, create_db_and_tables
 from app import models  # noqa: F401
+from app import push_service  # noqa: F401
 from app.product_routes import router as product_router
 from app.twilio_service import send_otp, verify_otp
 from app.location_service import search_places

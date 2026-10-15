@@ -7,7 +7,7 @@ from sqlmodel import SQLModel, Field as DBField, Session, select
 from sqlalchemy import update
 from app.database import get_session
 from app.models import Product
-from app.admin_routes import require_admin
+from app.admin_auth import require_admin
 
 router = APIRouter(tags=["Daily Stock"])
 IST = ZoneInfo("Asia/Kolkata")

@@ -6,11 +6,12 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.admin_auth import ADMIN_TOKEN_SECRET, require_admin
 from app.models import Product
 from app.payment_routes import PaymentOrder
 from app.push_service import get_public_key, save_subscription, delete_subscription
@@ -19,9 +20,6 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 # Shared admin access PIN. Change this value here if you ever want a new PIN.
 ADMIN_PIN = "5831"
-
-# Fixed signing key for 12-hour admin sessions. Keep this value private.
-ADMIN_TOKEN_SECRET = b"fish-spot-malpe-admin-session-key-2026-10-13-7f3c9a2e"
 
 
 def _b64(data: bytes) -> str:
@@ -33,22 +31,6 @@ def _make_token() -> str:
     signature = _b64(hmac.new(ADMIN_TOKEN_SECRET, payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{signature}"
 
-
-def require_admin(authorization: Optional[str] = Header(default=None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Admin login required")
-    token = authorization[7:].strip()
-    try:
-        payload_part, signature = token.split(".", 1)
-        expected = _b64(hmac.new(ADMIN_TOKEN_SECRET, payload_part.encode(), hashlib.sha256).digest())
-        if not hmac.compare_digest(signature, expected):
-            raise ValueError("Invalid signature")
-        payload = json.loads(base64.urlsafe_b64decode(payload_part + "=" * (-len(payload_part) % 4)))
-        if payload.get("role") != "admin" or int(payload.get("exp", 0)) < int(time.time()):
-            raise ValueError("Expired token")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Admin session expired. Please log in again.")
-    return True
 
 
 class LoginRequest(BaseModel):

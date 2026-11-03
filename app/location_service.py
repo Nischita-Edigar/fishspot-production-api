@@ -51,9 +51,10 @@ async def search_places(search_text: str):
         print(
             "GOOGLE PLACES ERROR:",
             response.status_code,
-            response.text,
+            repr(response.text),
             flush=True,
         )
+
         raise RuntimeError("Google Places API request failed")
 
     data = response.json()
@@ -98,7 +99,10 @@ async def calculate_driving_distance(
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-        "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+        "X-Goog-FieldMask": (
+            "routes.distanceMeters,"
+            "routes.duration"
+        ),
     }
 
     payload = {
@@ -131,23 +135,33 @@ async def calculate_driving_distance(
                 json=payload,
             )
 
-        # Log Google's actual error response
+        # ------------------------------------------
+        # GOOGLE API ERROR DETAILS
+        # ------------------------------------------
+
         if response.status_code != 200:
+
             print(
                 "GOOGLE ROUTES STATUS:",
                 response.status_code,
                 flush=True,
             )
 
+            # repr() keeps the complete JSON response
+            # on one log line.
             print(
                 "GOOGLE ROUTES ERROR DETAILS:",
-                response.text,
+                repr(response.text),
                 flush=True,
             )
 
             raise RuntimeError(
                 f"Google Routes API failed: {response.status_code}"
             )
+
+        # ------------------------------------------
+        # PARSE GOOGLE RESPONSE
+        # ------------------------------------------
 
         data = response.json()
 
@@ -156,9 +170,10 @@ async def calculate_driving_distance(
         if not routes:
             print(
                 "GOOGLE ROUTES RETURNED NO ROUTES:",
-                data,
+                repr(data),
                 flush=True,
             )
+
             raise RuntimeError("No driving route found")
 
         route = routes[0]
@@ -168,6 +183,10 @@ async def calculate_driving_distance(
 
         if distance_meters is None:
             raise RuntimeError("Driving distance unavailable")
+
+        # ------------------------------------------
+        # DELIVERY CHARGE CALCULATION
+        # ------------------------------------------
 
         distance_km = distance_meters / 1000
 
@@ -183,20 +202,27 @@ async def calculate_driving_distance(
 
         print(
             "GOOGLE ROUTE SUCCESS:",
-            result,
+            repr(result),
             flush=True,
         )
 
         return result
 
     except httpx.TimeoutException:
-        print("GOOGLE ROUTES TIMEOUT", flush=True)
+        print(
+            "GOOGLE ROUTES TIMEOUT",
+            flush=True,
+        )
+
         raise RuntimeError("Google Routes API timed out")
 
     except httpx.RequestError as error:
         print(
             "GOOGLE ROUTES CONNECTION ERROR:",
-            str(error),
+            repr(str(error)),
             flush=True,
         )
-        raise RuntimeError("Unable to connect to Google Routes API")
+
+        raise RuntimeError(
+            "Unable to connect to Google Routes API"
+        )

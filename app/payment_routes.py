@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import uuid
 import base64
 import time
@@ -27,6 +28,7 @@ PACKING_FEE_PAISE = 500
 class PaymentOrder(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     razorpay_order_id: str = Field(unique=True, index=True)
+    public_order_id: str | None = Field(default=None, unique=True, index=True, max_length=8)
     amount_paise: int
     status: str = "created"
     items_json: str
@@ -42,6 +44,24 @@ class PaymentOrder(SQLModel, table=True):
     dropoff_longitude: float | None = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
+    )
+
+
+def generate_public_order_id(session: Session) -> str:
+    """Generate a unique customer-facing ID such as FSM48291."""
+    for _ in range(100):
+        candidate = f"FSM{secrets.randbelow(90000) + 10000}"
+        existing = session.exec(
+            select(PaymentOrder).where(
+                PaymentOrder.public_order_id == candidate
+            )
+        ).first()
+        if not existing:
+            return candidate
+
+    raise HTTPException(
+        status_code=503,
+        detail="Could not generate an order number. Please try again.",
     )
 
 
@@ -188,6 +208,7 @@ async def create_order(
         + PACKING_FEE_PAISE
     )
 
+    public_order_id = generate_public_order_id(session)
     receipt = f"fsm_{uuid.uuid4().hex[:20]}"
 
     try:
@@ -203,6 +224,7 @@ async def create_order(
                         "source": "Fish Spot Malpe",
                         "customer_name": customer_name,
                         "customer_phone": customer_phone,
+                        "fishspot_order_id": public_order_id,
                     },
                 },
             )
@@ -217,6 +239,7 @@ async def create_order(
 
     payment_order = PaymentOrder(
         razorpay_order_id=razorpay_order["id"],
+        public_order_id=public_order_id,
         amount_paise=total_paise,
         status="created",
         items_json=json.dumps(order_items),
@@ -245,6 +268,7 @@ async def create_order(
     return {
         "key_id": key_id,
         "order_id": razorpay_order["id"],
+        "display_order_id": payment_order.public_order_id,
         "amount": total_paise,
         "currency": "INR",
         "subtotal_paise": subtotal_paise,
@@ -341,6 +365,7 @@ async def verify_payment(
         return {
             "verified": True,
             "paid": False,
+            "display_order_id": payment_order.public_order_id,
             "status": payment_status or "pending",
             "delivery_status": payment_order.delivery_status,
             "tracking_url": payment_order.tracking_url,
@@ -363,8 +388,9 @@ async def verify_payment(
                 "title": "New Fish Spot Malpe order",
                 "body": f"{payment_order.customer_name or 'Customer'} · ₹{payment_order.amount_paise / 100:.2f}",
                 "url": "/",
-                "tag": payment_order.razorpay_order_id,
+                "tag": payment_order.public_order_id or payment_order.razorpay_order_id,
                 "order_id": payment_order.razorpay_order_id,
+                "display_order_id": payment_order.public_order_id,
             })
         except Exception:
             import logging
@@ -375,6 +401,7 @@ async def verify_payment(
     return {
         "verified": True,
         "paid": True,
+        "display_order_id": payment_order.public_order_id,
         "status": "captured",
         "delivery_id": payment_order.delivery_id,
         "tracking_url": payment_order.tracking_url,
@@ -632,6 +659,7 @@ def get_customer_orders(
 
         result.append({
             "id": order.id,
+            "display_order_id": order.public_order_id,
             "razorpay_order_id": order.razorpay_order_id,
             "status": order.status,
             "items": items,

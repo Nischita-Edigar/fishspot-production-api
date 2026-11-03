@@ -18,26 +18,11 @@ from sqlmodel import Field, Session, SQLModel, select
 from app.database import get_session
 from app.models import Product
 from app.stock_routes import consume_stock
-from app.uber_service import (
-    create_uber_delivery,
-    get_uber_delivery_quote,
-)
+from app.location_service import calculate_driving_distance
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
 PACKING_FEE_PAISE = 500
-
-PICKUP_ADDRESS = {
-    "street_address": ["98 1st Cross Road"],
-    "city": "Bengaluru",
-    "state": "Karnataka",
-    "zip_code": "560078",
-    "country": "IN",
-}
-
-PICKUP_LATITUDE = 12.890616
-PICKUP_LONGITUDE = 77.582438
-
 
 class PaymentOrder(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
@@ -52,7 +37,7 @@ class PaymentOrder(SQLModel, table=True):
     payment_id: str | None = None
     delivery_id: str | None = Field(default=None, index=True)
     tracking_url: str | None = None
-    delivery_status: str = "not_created"
+    delivery_status: str = "not_required"
     dropoff_latitude: float | None = None
     dropoff_longitude: float | None = None
     created_at: datetime = Field(
@@ -170,34 +155,31 @@ async def create_order(
             detail="Delivery is currently available only in Bangalore.",
         )
 
+    # Calculate the customer delivery fee using Google Routes API at ₹10/km.
     try:
-        quote = await get_uber_delivery_quote(
-            pickup_address=PICKUP_ADDRESS,
-            dropoff_address=request.dropoff_address,
-            pickup_latitude=PICKUP_LATITUDE,
-            pickup_longitude=PICKUP_LONGITUDE,
-            dropoff_latitude=request.dropoff_latitude,
-            dropoff_longitude=request.dropoff_longitude,
+        route = await calculate_driving_distance(
+            origin_lat=12.890616,
+            origin_lng=77.582438,
+            destination_lat=request.dropoff_latitude,
+            destination_lng=request.dropoff_longitude,
         )
 
-        if str(quote.get("currency", "")).lower() != "inr":
-            raise HTTPException(
-                status_code=502,
-                detail="Uber returned an unsupported currency.",
-            )
+        delivery_fee_rupees = float(route["delivery_fee"])
+        if delivery_fee_rupees < 0:
+            raise ValueError("Invalid Google Routes delivery fee.")
 
-        delivery_fee_paise = int(quote["fee"])
-        quote_id = quote.get("id")
-
-        if delivery_fee_paise < 0 or not quote_id:
-            raise ValueError("Invalid Uber delivery quote.")
+        delivery_fee_paise = round(delivery_fee_rupees * 100)
 
     except HTTPException:
         raise
     except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Google Routes delivery fee calculation failed"
+        )
         raise HTTPException(
             status_code=502,
-            detail="Unable to confirm delivery charges. Please try again.",
+            detail="Unable to calculate delivery charges. Please try again.",
         )
 
     total_paise = (
@@ -239,7 +221,8 @@ async def create_order(
         status="created",
         items_json=json.dumps(order_items),
         address_json=json.dumps(request.dropoff_address),
-        delivery_quote_id=str(quote_id),
+        delivery_quote_id="not_applicable",
+        delivery_status="not_required",
         customer_name=customer_name,
         customer_phone=customer_phone,
         dropoff_latitude=request.dropoff_latitude,
@@ -387,91 +370,7 @@ async def verify_payment(
             import logging
             logging.getLogger("fishspot.push").exception("Could not send new-order push notification")
 
-    # Only start delivery creation for orders that have not started it.
-    # A stuck "creating" status must be reconciled before retrying.
-    if payment_order.delivery_status == "not_created":
-        payment_order.delivery_status = "creating"
-        session.add(payment_order)
-        session.commit()
-
-        try:
-            if (
-                payment_order.dropoff_latitude is None
-                or payment_order.dropoff_longitude is None
-            ):
-                raise RuntimeError(
-                    "Saved delivery coordinates are missing."
-                )
-
-            pickup_phone = os.getenv("UBER_PICKUP_PHONE")
-            if not pickup_phone:
-                raise RuntimeError(
-                    "UBER_PICKUP_PHONE is not configured."
-                )
-
-            items = json.loads(payment_order.items_json)
-            address = json.loads(payment_order.address_json)
-
-            manifest_items = [
-                {
-                    "name": item["name"],
-                    "quantity": item["quantity"],
-                    "price": item["unit_price_paise"],
-                }
-                for item in items
-            ]
-
-            delivery = await create_uber_delivery(
-                quote_id=payment_order.delivery_quote_id,
-                external_order_id=payment_order.razorpay_order_id,
-                pickup_address=PICKUP_ADDRESS,
-                dropoff_address=address,
-                pickup_name=os.getenv(
-                    "UBER_PICKUP_NAME", "Fish Spot Malpe"
-                ),
-                pickup_phone_number=pickup_phone,
-                dropoff_name=payment_order.customer_name or "Customer",
-                dropoff_phone_number=(
-                    "+91" + (payment_order.customer_phone or "")
-                ),
-                pickup_latitude=PICKUP_LATITUDE,
-                pickup_longitude=PICKUP_LONGITUDE,
-                dropoff_latitude=payment_order.dropoff_latitude,
-                dropoff_longitude=payment_order.dropoff_longitude,
-                manifest_items=manifest_items,
-            )
-
-            delivery_id = (
-                delivery.get("id")
-                or delivery.get("delivery_id")
-                or delivery.get("uuid")
-            )
-            tracking_url = (
-                delivery.get("tracking_url")
-                or delivery.get("order_tracking_url")
-            )
-
-            if not delivery_id:
-                raise RuntimeError(
-                    "Uber response did not contain a delivery ID."
-                )
-
-            payment_order.delivery_id = str(delivery_id)
-            payment_order.tracking_url = tracking_url
-            payment_order.delivery_status = str(
-                delivery.get("status")
-                or delivery.get("state")
-                or "created"
-            ).lower()
-
-        except Exception:
-            # Payment remains paid. Do not automatically resubmit an
-            # ambiguous delivery request because Uber may have accepted it.
-            payment_order.delivery_status = "creation_failed"
-
-        session.add(payment_order)
-        session.commit()
-        session.refresh(payment_order)
+    # Delivery is handled separately; no third-party delivery request is created here.
 
     return {
         "verified": True,

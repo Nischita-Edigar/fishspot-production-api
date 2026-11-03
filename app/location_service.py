@@ -1,5 +1,6 @@
 
 import os
+import math
 import httpx
 from dotenv import load_dotenv
 
@@ -73,6 +74,7 @@ async def calculate_driving_distance(
 ):
     """
     Calculate actual driving distance using Google Maps Routes API.
+    Delivery charge: ₹10 per kilometre, rounded up.
     """
 
     if not GOOGLE_MAPS_API_KEY:
@@ -81,10 +83,7 @@ async def calculate_driving_distance(
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
-        "X-Goog-FieldMask": (
-            "routes.distanceMeters,"
-            "routes.duration"
-        ),
+        "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
     }
 
     payload = {
@@ -116,19 +115,23 @@ async def calculate_driving_distance(
             json=payload,
         )
 
+    # Check Google's response
     if response.status_code != 200:
-        print(
-            "Google Routes API error:",
-            response.status_code,
-            response.text,
+        print("GOOGLE ROUTES STATUS:", response.status_code)
+        print("GOOGLE ROUTES RESPONSE:", response.text)
+
+        raise RuntimeError(
+            f"Google Routes API failed: {response.status_code}"
         )
-        raise RuntimeError("Unable to calculate driving distance")
 
     data = response.json()
+
+    # Check whether Google returned a route
     routes = data.get("routes", [])
 
     if not routes:
-        raise RuntimeError("No driving route found")
+        print("GOOGLE ROUTES RETURNED NO ROUTES:", data)
+        raise RuntimeError("Google Routes API returned no routes")
 
     route = routes[0]
 
@@ -141,7 +144,7 @@ async def calculate_driving_distance(
     distance_km = distance_meters / 1000
 
     # ₹10 per kilometre, rounded up to the next rupee.
-    delivery_fee = int(__import__("math").ceil(distance_km * 10))
+    delivery_fee = math.ceil(distance_km * 10)
 
     return {
         "distance_meters": distance_meters,

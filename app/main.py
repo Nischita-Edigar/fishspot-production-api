@@ -16,9 +16,10 @@ from app import models  # noqa: F401
 from app import push_service  # noqa: F401
 from app.product_routes import router as product_router
 from app.twilio_service import send_otp, verify_otp
-from app.location_service import search_places
+from app.location_service import search_places, calculate_driving_distance
 from app.payment_routes import router as payment_router
 from app.admin_routes import router as admin_router
+from app.stock_routes import router as stock_router
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -67,6 +68,11 @@ class SendOtpRequest(BaseModel):
 class VerifyOtpRequest(BaseModel):
     phone_number: str = Field(min_length=10, max_length=20)
     otp: str = Field(min_length=4, max_length=8)
+
+
+class DeliveryDistanceRequest(BaseModel):
+    destination_latitude: float = Field(ge=-90, le=90)
+    destination_longitude: float = Field(ge=-180, le=180)
 
 
 def normalize_indian_phone(phone_number: str) -> str:
@@ -165,165 +171,37 @@ async def location_search(q: str):
         )
 
 
-@app.get("/uber/test")
-async def uber_test():
-    from app.uber_service import get_uber_access_token
+@app.post("/delivery/distance")
+async def delivery_distance(request: DeliveryDistanceRequest):
+    # Fish Spot Malpe pickup coordinates.
+    # Verify these coordinates point to the exact shop entrance before launch.
+    shop_latitude = 12.890616
+    shop_longitude = 77.582438
 
     try:
-        token = await get_uber_access_token()
-
-        return {
-            "success": True,
-            "message": "Uber authentication successful",
-            "token_received": bool(token),
-        }
-    except Exception:
-        logger.exception("Uber authentication test failed")
-        raise HTTPException(
-            status_code=502,
-            detail="Uber authentication failed; check server logs",
-        )
-
-
-@app.post("/uber/quote")
-async def uber_quote(data: dict):
-    from app.uber_service import get_uber_delivery_quote
-
-    pickup_address = {
-        "street_address": ["98 1st Cross Road"],
-        "city": "Bengaluru",
-        "state": "Karnataka",
-        "zip_code": "560078",
-        "country": "IN",
-    }
-
-    dropoff_address = data.get("dropoff_address")
-    dropoff_latitude = data.get("dropoff_latitude")
-    dropoff_longitude = data.get("dropoff_longitude")
-
-    if not isinstance(dropoff_address, dict):
-        raise HTTPException(
-            status_code=422,
-            detail="A valid dropoff_address object is required.",
-        )
-
-    if dropoff_latitude is None or dropoff_longitude is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Dropoff latitude and longitude are required.",
-        )
-
-    try:
-        latitude = float(dropoff_latitude)
-        longitude = float(dropoff_longitude)
-
-        if not (-90 <= latitude <= 90):
-            raise ValueError("Latitude is out of range")
-
-        if not (-180 <= longitude <= 180):
-            raise ValueError("Longitude is out of range")
-
-        quote = await get_uber_delivery_quote(
-            pickup_address=pickup_address,
-            dropoff_address=dropoff_address,
-            pickup_latitude=12.890616,
-            pickup_longitude=77.582438,
-            dropoff_latitude=latitude,
-            dropoff_longitude=longitude,
+        result = await calculate_driving_distance(
+            origin_lat=shop_latitude,
+            origin_lng=shop_longitude,
+            destination_lat=request.destination_latitude,
+            destination_lng=request.destination_longitude,
         )
 
         return {
             "success": True,
-            "quote": quote,
-        }
-    except (ValueError, TypeError):
-        raise HTTPException(
-            status_code=422,
-            detail="Dropoff coordinates must be valid numbers.",
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Uber delivery quote failed")
-        raise HTTPException(
-            status_code=502,
-            detail="Unable to retrieve Uber delivery quote.",
-        )
-
-
-@app.post("/uber/delivery/test")
-async def uber_delivery_test():
-    from app.uber_service import (
-        get_uber_delivery_quote,
-        create_uber_delivery,
-    )
-
-    pickup_address = {
-        "street_address": ["98 1st Cross Road"],
-        "city": "Bengaluru",
-        "state": "Karnataka",
-        "zip_code": "560078",
-        "country": "IN",
-    }
-
-    dropoff_address = {
-        "street_address": ["98 1st Cross Road"],
-        "city": "Bengaluru",
-        "state": "Karnataka",
-        "zip_code": "560078",
-        "country": "IN",
-    }
-
-    pickup_latitude = 12.890616
-    pickup_longitude = 77.582438
-    dropoff_latitude = 12.890616
-    dropoff_longitude = 77.582438
-
-    try:
-        quote = await get_uber_delivery_quote(
-            pickup_address=pickup_address,
-            dropoff_address=dropoff_address,
-            pickup_latitude=pickup_latitude,
-            pickup_longitude=pickup_longitude,
-            dropoff_latitude=dropoff_latitude,
-            dropoff_longitude=dropoff_longitude,
-        )
-
-        quote_id = quote.get("id")
-
-        if not quote_id:
-            raise RuntimeError("Uber quote did not return a quote ID.")
-
-        delivery = await create_uber_delivery(
-            quote_id=quote_id,
-            external_order_id="FISHSPOT-TEST-001",
-            pickup_address=pickup_address,
-            dropoff_address=dropoff_address,
-            pickup_name="Fish Spot Malpe",
-            pickup_phone_number="+919876543210",
-            dropoff_name="Test Customer",
-            dropoff_phone_number="+919008401064",
-            pickup_latitude=pickup_latitude,
-            pickup_longitude=pickup_longitude,
-            dropoff_latitude=dropoff_latitude,
-            dropoff_longitude=dropoff_longitude,
-        )
-
-        return {
-            "success": True,
-            "quote": quote,
-            "delivery": delivery,
+            "distance_km": result["distance_km"],
+            "distance_meters": result["distance_meters"],
+            "duration": result["duration"],
+            "delivery_fee": result["delivery_fee"],
         }
     except Exception:
-        logger.exception("Uber test delivery failed")
+        logger.exception("Driving distance calculation failed")
         raise HTTPException(
             status_code=502,
-            detail="Unable to create Uber test delivery; check server logs.",
+            detail="Unable to calculate driving distance",
         )
 
 
 app.include_router(product_router)
 app.include_router(payment_router)
 app.include_router(admin_router)
-from app.stock_routes import router as stock_router
 app.include_router(stock_router)

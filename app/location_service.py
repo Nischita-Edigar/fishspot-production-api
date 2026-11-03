@@ -17,6 +17,10 @@ GOOGLE_ROUTES_URL = (
 )
 
 
+# --------------------------------------------------
+# GOOGLE PLACES AUTOCOMPLETE
+# --------------------------------------------------
+
 async def search_places(search_text: str):
     if not GOOGLE_MAPS_API_KEY:
         raise RuntimeError("GOOGLE_MAPS_API_KEY is missing")
@@ -44,7 +48,12 @@ async def search_places(search_text: str):
         )
 
     if response.status_code != 200:
-        print("Google Places error:", response.status_code, response.text)
+        print(
+            "GOOGLE PLACES ERROR:",
+            response.status_code,
+            response.text,
+            flush=True,
+        )
         raise RuntimeError("Google Places API request failed")
 
     data = response.json()
@@ -66,6 +75,10 @@ async def search_places(search_text: str):
     return suggestions
 
 
+# --------------------------------------------------
+# GOOGLE MAPS DRIVING DISTANCE
+# --------------------------------------------------
+
 async def calculate_driving_distance(
     origin_lat: float,
     origin_lng: float,
@@ -73,8 +86,10 @@ async def calculate_driving_distance(
     destination_lng: float,
 ):
     """
-    Calculate actual driving distance using Google Maps Routes API.
-    Delivery charge: ₹10 per kilometre, rounded up.
+    Calculate actual road distance using Google Routes API.
+
+    Delivery charge:
+    ₹10 per kilometre, rounded up to the next rupee.
     """
 
     if not GOOGLE_MAPS_API_KEY:
@@ -108,47 +123,80 @@ async def calculate_driving_distance(
         "computeAlternativeRoutes": False,
     }
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(
-            GOOGLE_ROUTES_URL,
-            headers=headers,
-            json=payload,
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                GOOGLE_ROUTES_URL,
+                headers=headers,
+                json=payload,
+            )
+
+        # Log Google's actual error response
+        if response.status_code != 200:
+            print(
+                "GOOGLE ROUTES STATUS:",
+                response.status_code,
+                flush=True,
+            )
+
+            print(
+                "GOOGLE ROUTES ERROR DETAILS:",
+                response.text,
+                flush=True,
+            )
+
+            raise RuntimeError(
+                f"Google Routes API failed: {response.status_code}"
+            )
+
+        data = response.json()
+
+        routes = data.get("routes", [])
+
+        if not routes:
+            print(
+                "GOOGLE ROUTES RETURNED NO ROUTES:",
+                data,
+                flush=True,
+            )
+            raise RuntimeError("No driving route found")
+
+        route = routes[0]
+
+        distance_meters = route.get("distanceMeters")
+        duration = route.get("duration")
+
+        if distance_meters is None:
+            raise RuntimeError("Driving distance unavailable")
+
+        distance_km = distance_meters / 1000
+
+        # ₹10 per kilometre, rounded up.
+        delivery_fee = math.ceil(distance_km * 10)
+
+        result = {
+            "distance_meters": distance_meters,
+            "distance_km": round(distance_km, 2),
+            "duration": duration,
+            "delivery_fee": delivery_fee,
+        }
+
+        print(
+            "GOOGLE ROUTE SUCCESS:",
+            result,
+            flush=True,
         )
 
-    # Check Google's response
-    if response.status_code != 200:
-        print("GOOGLE ROUTES STATUS:", response.status_code)
-        print("GOOGLE ROUTES RESPONSE:", response.text)
+        return result
 
-        raise RuntimeError(
-            f"Google Routes API failed: {response.status_code}"
+    except httpx.TimeoutException:
+        print("GOOGLE ROUTES TIMEOUT", flush=True)
+        raise RuntimeError("Google Routes API timed out")
+
+    except httpx.RequestError as error:
+        print(
+            "GOOGLE ROUTES CONNECTION ERROR:",
+            str(error),
+            flush=True,
         )
-
-    data = response.json()
-
-    # Check whether Google returned a route
-    routes = data.get("routes", [])
-
-    if not routes:
-        print("GOOGLE ROUTES RETURNED NO ROUTES:", data)
-        raise RuntimeError("Google Routes API returned no routes")
-
-    route = routes[0]
-
-    distance_meters = route.get("distanceMeters")
-    duration = route.get("duration")
-
-    if distance_meters is None:
-        raise RuntimeError("Driving distance unavailable")
-
-    distance_km = distance_meters / 1000
-
-    # ₹10 per kilometre, rounded up to the next rupee.
-    delivery_fee = math.ceil(distance_km * 10)
-
-    return {
-        "distance_meters": distance_meters,
-        "distance_km": round(distance_km, 2),
-        "duration": duration,
-        "delivery_fee": delivery_fee,
-    }
+        raise RuntimeError("Unable to connect to Google Routes API")

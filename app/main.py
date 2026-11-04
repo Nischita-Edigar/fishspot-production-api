@@ -33,6 +33,8 @@ def get_cors_origins():
         "CORS_ORIGINS",
         "https://fishspotmalpe.com,https://www.fishspotmalpe.com,"
         "http://localhost:5173,http://127.0.0.1:5173",
+        "https://fishspot-admin-620932318627.asia-south1.run.app,"
+
     )
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 

@@ -28,15 +28,23 @@ logging.basicConfig(
 logger = logging.getLogger("fishspot")
 
 
-def get_cors_origins():
-    raw = os.getenv(
-        "CORS_ORIGINS",
-        "https://fishspotmalpe.com,https://www.fishspotmalpe.com,"
-        "http://localhost:5173,http://127.0.0.1:5173",
-        "https://fishspot-admin-620932318627.asia-south1.run.app,"
 
-    )
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+def get_cors_origins():
+    default_origins = ",".join([
+        "https://fishspotmalpe.com",
+        "https://www.fishspotmalpe.com",
+        "https://fishspot-admin-620932318627.asia-south1.run.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ])
+
+    raw = os.getenv("CORS_ORIGINS", default_origins)
+
+    return [
+        origin.strip().rstrip("/")
+        for origin in raw.split(",")
+        if origin.strip()
+    ]
 
 
 @asynccontextmanager

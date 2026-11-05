@@ -40,6 +40,11 @@ class PaymentOrder(SQLModel, table=True):
     delivery_id: str | None = Field(default=None, index=True)
     tracking_url: str | None = None
     delivery_status: str = "not_required"
+    estimated_delivery_text: str | None = Field(
+        default=None,
+        max_length=120,
+    )
+    order_preparation_minutes: int = Field(default=15)
     dropoff_latitude: float | None = None
     dropoff_longitude: float | None = None
     created_at: datetime = Field(
@@ -77,6 +82,15 @@ class CreateOrderRequest(BaseModel):
     dropoff_longitude: float
     customer_name: str = PydanticField(min_length=1, max_length=120)
     customer_phone: str = PydanticField(min_length=10, max_length=20)
+    estimated_delivery_text: str | None = PydanticField(
+        default=None,
+        max_length=120,
+    )
+    order_preparation_minutes: int = PydanticField(
+        default=15,
+        ge=0,
+        le=240,
+    )
 
 
 class VerifyPaymentRequest(BaseModel):
@@ -250,6 +264,8 @@ async def create_order(
         customer_phone=customer_phone,
         dropoff_latitude=request.dropoff_latitude,
         dropoff_longitude=request.dropoff_longitude,
+        estimated_delivery_text=request.estimated_delivery_text,
+        order_preparation_minutes=request.order_preparation_minutes,
     )
 
     try:
@@ -667,6 +683,8 @@ def get_customer_orders(
             "created_at": order.created_at.isoformat(),
             "delivery_status": order.delivery_status,
             "tracking_url": order.tracking_url,
+            "estimated_delivery_text": order.estimated_delivery_text,
+            "order_preparation_minutes": order.order_preparation_minutes,
         })
 
     return {"orders": result}

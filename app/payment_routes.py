@@ -23,7 +23,7 @@ from app.location_service import calculate_driving_distance
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
-PACKING_FEE_PAISE = 500
+PACKING_FEE_PAISE = 000
 
 class PaymentOrder(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)

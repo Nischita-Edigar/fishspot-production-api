@@ -100,7 +100,7 @@ def admin_orders(session: Session = Depends(get_session)):
             address = {}
         result.append({
             "id": order.id,
-            "display_order_id": order.display_order_id,
+            "display_order_id": order.public_order_id,
             "razorpay_order_id": order.razorpay_order_id,
             "customer_name": order.customer_name or "Customer",
             "customer_phone": order.customer_phone or "",

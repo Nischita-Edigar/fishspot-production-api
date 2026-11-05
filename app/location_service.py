@@ -191,7 +191,7 @@ async def calculate_driving_distance(
         distance_km = distance_meters / 1000
 
         # ₹10 per kilometre, rounded up.
-        delivery_fee = math.ceil(distance_km * 0)
+        delivery_fee = math.ceil(distance_km * 10)
 
         result = {
             "distance_meters": distance_meters,
